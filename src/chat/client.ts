@@ -4,6 +4,15 @@ import { useEffect, useMemo, useRef, useState, startTransition } from "react";
 
 import type { ChatSession, ProviderDescriptor, StreamEnvelope } from "./domain";
 
+type BrowserStreamTelemetry = {
+  sessionId: string;
+  mode: "reply" | "resume";
+  startedAt: number;
+  firstEventAt: number | null;
+  firstTextDeltaAt: number | null;
+  pauseClickedAt: number | null;
+};
+
 type UseChatControllerResult = {
   providers: ProviderDescriptor[];
   selectedProviderId: string;
@@ -89,6 +98,21 @@ async function readEventStream(
   }
 }
 
+function emitBrowserTelemetry(name: string, detail: Record<string, unknown>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const payload = {
+    event: name,
+    timestamp: new Date().toISOString(),
+    ...detail,
+  };
+
+  window.dispatchEvent(new CustomEvent("chat-telemetry", { detail: payload }));
+  console.info("[chat-telemetry]", payload);
+}
+
 export function useChatController(): UseChatControllerResult {
   const [providers, setProviders] = useState<ProviderDescriptor[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState("");
@@ -98,6 +122,7 @@ export function useChatController(): UseChatControllerResult {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const activeAbortRef = useRef<AbortController | null>(null);
+  const browserTelemetryRef = useRef<BrowserStreamTelemetry | null>(null);
 
   const activeProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId) ?? null,
@@ -105,15 +130,43 @@ export function useChatController(): UseChatControllerResult {
   );
 
   const applyStreamEvent = (event: StreamEnvelope) => {
+    const currentTelemetry = browserTelemetryRef.current;
+    if (currentTelemetry && !currentTelemetry.firstEventAt) {
+      currentTelemetry.firstEventAt = performance.now();
+      emitBrowserTelemetry("turn.first_sse_event", {
+        sessionId: currentTelemetry.sessionId,
+        mode: currentTelemetry.mode,
+        latencyMs: currentTelemetry.firstEventAt - currentTelemetry.startedAt,
+      });
+    }
+
     if (event.event === "session" || event.event === "done") {
       setSession(event.data);
       if (event.event === "done") {
+        const finishedTelemetry = browserTelemetryRef.current;
+        if (finishedTelemetry) {
+          emitBrowserTelemetry("turn.stream_done", {
+            sessionId: finishedTelemetry.sessionId,
+            mode: finishedTelemetry.mode,
+            durationMs: performance.now() - finishedTelemetry.startedAt,
+          });
+        }
+        browserTelemetryRef.current = null;
         setIsStreaming(false);
       }
       return;
     }
 
     if (event.event === "text-delta") {
+      if (currentTelemetry && !currentTelemetry.firstTextDeltaAt) {
+        currentTelemetry.firstTextDeltaAt = performance.now();
+        emitBrowserTelemetry("turn.first_text_delta", {
+          sessionId: currentTelemetry.sessionId,
+          mode: currentTelemetry.mode,
+          latencyMs: currentTelemetry.firstTextDeltaAt - currentTelemetry.startedAt,
+        });
+      }
+
       setSession((current) => {
         if (!current) {
           return current;
@@ -137,6 +190,7 @@ export function useChatController(): UseChatControllerResult {
     }
 
     setError(event.data.message);
+    browserTelemetryRef.current = null;
     setIsStreaming(false);
   };
 
@@ -211,6 +265,18 @@ export function useChatController(): UseChatControllerResult {
     activeAbortRef.current = abortController;
     setIsStreaming(true);
     setError(null);
+    browserTelemetryRef.current = {
+      sessionId: session.id,
+      mode: body.mode,
+      startedAt: performance.now(),
+      firstEventAt: null,
+      firstTextDeltaAt: null,
+      pauseClickedAt: null,
+    };
+    emitBrowserTelemetry("turn.submit", {
+      sessionId: session.id,
+      mode: body.mode,
+    });
 
     try {
       const response = await fetch(`/api/chat/sessions/${session.id}/turn`, {
@@ -222,6 +288,13 @@ export function useChatController(): UseChatControllerResult {
         signal: abortController.signal,
       });
 
+      emitBrowserTelemetry("turn.response_headers", {
+        sessionId: session.id,
+        mode: body.mode,
+        status: response.status,
+        requestId: response.headers.get("x-request-id"),
+      });
+
       await readEventStream(response, applyStreamEvent);
     } catch (streamError) {
       if ((streamError as DOMException).name !== "AbortError") {
@@ -229,6 +302,9 @@ export function useChatController(): UseChatControllerResult {
       }
     } finally {
       activeAbortRef.current = null;
+      if (!isStreaming) {
+        browserTelemetryRef.current = null;
+      }
       setIsStreaming(false);
     }
   }
@@ -251,9 +327,25 @@ export function useChatController(): UseChatControllerResult {
       return;
     }
 
+    const telemetry = browserTelemetryRef.current;
+    if (telemetry) {
+      telemetry.pauseClickedAt = performance.now();
+      emitBrowserTelemetry("turn.pause_click", {
+        sessionId: telemetry.sessionId,
+        mode: telemetry.mode,
+      });
+    }
+
     await fetchJson(`/api/chat/sessions/${session.id}/pause`, {
       method: "POST",
     });
+    if (telemetry?.pauseClickedAt) {
+      emitBrowserTelemetry("turn.pause_http_ok", {
+        sessionId: telemetry.sessionId,
+        mode: telemetry.mode,
+        latencyMs: performance.now() - telemetry.pauseClickedAt,
+      });
+    }
     activeAbortRef.current?.abort();
     setSession((current) =>
       current
@@ -274,6 +366,14 @@ export function useChatController(): UseChatControllerResult {
 
     const payload = await fetchJson<{ session: ChatSession }>(`/api/chat/sessions/${session.id}`);
     setSession(payload.session);
+    if (telemetry?.pauseClickedAt) {
+      emitBrowserTelemetry("turn.pause_ui_reconciled", {
+        sessionId: telemetry.sessionId,
+        mode: telemetry.mode,
+        latencyMs: performance.now() - telemetry.pauseClickedAt,
+      });
+    }
+    browserTelemetryRef.current = null;
     setIsStreaming(false);
   }
 
@@ -282,6 +382,10 @@ export function useChatController(): UseChatControllerResult {
       return;
     }
 
+    emitBrowserTelemetry("turn.resume_submit", {
+      sessionId: session.id,
+      mode: "resume",
+    });
     await beginStream({
       mode: "resume",
     });

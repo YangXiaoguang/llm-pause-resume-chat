@@ -1,0 +1,104 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  # Redaction runs before sampling so sensitive fields never reach either the
+  # sampling cache or downstream storage in raw form.
+  redaction/chat:
+    allow_all_keys: true
+    redact_all_types: true
+    blocked_key_patterns:
+      - "(?i).*prompt.*"
+      - "(?i).*input.*"
+      - "(?i).*output.*"
+      - "(?i).*content.*"
+    blocked_values:
+      - "(?i)bearer\\s+[a-z0-9\\-\\._]+"
+      - "(?i)sk-[a-z0-9\\-_]+"
+      - "(?i)pk-lf-[a-z0-9\\-_]+"
+      - "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
+    summary: info
+
+  # Tail sampling keeps the traces that matter most for this repository:
+  # failures, resumes, paused turns, and slow requests. Everything else is
+  # downsampled to control local storage volume.
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 10000
+    expected_new_traces_per_sec: 100
+    sample_on_first_match: true
+    decision_cache:
+      sampled_cache_size: 50000
+      non_sampled_cache_size: 50000
+    policies:
+      - name: keep-errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: keep-resume-turns
+        type: string_attribute
+        string_attribute:
+          key: chat.mode
+          values: [resume]
+      - name: keep-paused-turns
+        type: string_attribute
+        string_attribute:
+          key: chat.outcome
+          values: [paused_by_user, client_disconnected]
+      - name: keep-slow-turns
+        type: latency
+        latency:
+          threshold_ms: 3000
+      - name: sample-default
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 20
+
+  # These IDs are useful in the app and Langfuse, but they are noisy and high
+  # cardinality in Grafana backends. We drop them after sampling decisions.
+  attributes/governance:
+    actions:
+      - key: chat.request.id
+        action: delete
+      - key: chat.assistant_message.id
+        action: delete
+      - key: chat.user_message.id
+        action: delete
+
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  otlphttp/lgtm:
+    endpoint: http://otel-lgtm:4318
+    tls:
+      insecure: true
+  debug:
+    verbosity: basic
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, redaction/chat, tail_sampling, attributes/governance, batch]
+      exporters: [otlphttp/lgtm, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/lgtm]

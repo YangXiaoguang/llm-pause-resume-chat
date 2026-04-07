@@ -5,10 +5,25 @@
   "packageManager": "pnpm@10.32.1",
   "scripts": {
     "dev": "next dev",
+    "dev:otel": "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "obs:up": "docker compose -f docker-compose.observability.yml up -d",
+    "obs:down": "docker compose -f docker-compose.observability.yml down"
   },
   "dependencies": {
+    "@langfuse/client": "^5.0.2",
+    "@langfuse/otel": "^5.0.2",
+    "@langfuse/tracing": "^5.0.2",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.214.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.214.0",
+    "@opentelemetry/instrumentation-http": "^0.214.0",
+    "@opentelemetry/instrumentation-undici": "^0.24.0",
+    "@opentelemetry/resources": "^2.6.1",
+    "@opentelemetry/sdk-metrics": "^2.6.1",
+    "@opentelemetry/sdk-node": "^0.214.0",
+    "@opentelemetry/semantic-conventions": "^1.40.0",
     "next": "^15.5.3",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

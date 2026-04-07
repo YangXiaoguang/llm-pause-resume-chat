@@ -33,11 +33,76 @@ export type ChatMessage = {
   updatedAt: string;
 };
 
+export type ChatTurnOutcome =
+  | "in_progress"
+  | "completed"
+  | "paused_by_user"
+  | "client_disconnected"
+  | "provider_error"
+  | "validation_error";
+
+export type ChatUsage = {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  cacheCreationInputTokens: number | null;
+  cacheReadInputTokens: number | null;
+  providerRequestId: string | null;
+};
+
+export type ChatTiming = {
+  startedAt: string;
+  firstTokenAt: string | null;
+  pauseRequestedAt: string | null;
+  pauseObservedAt: string | null;
+  completedAt: string | null;
+};
+
+export type ChatPromptReference = {
+  key: string;
+  name: string;
+  version: number;
+  label: string | null;
+  source: "langfuse" | "local" | "session";
+  isFallback: boolean;
+  templateHash: string;
+  templateLength: number;
+  compiledHash: string;
+  compiledLength: number;
+  commitMessage: string | null;
+};
+
+export type ChatTurnRunSummary = {
+  id: string;
+  sequence: number;
+  parentTurnId: string | null;
+  rootTurnId: string;
+  assistantMessageId: string;
+  userMessageId: string | null;
+  mode: "reply" | "resume";
+  providerId: string;
+  model: string;
+  outcome: ChatTurnOutcome;
+  timing: ChatTiming;
+  promptRefs: ChatPromptReference[];
+  usage: ChatUsage;
+  chunkCount: number;
+  inputChars: number;
+  outputChars: number;
+  stopReason: string | null;
+  errorMessage: string | null;
+  traceId: string | null;
+  providerObservationId: string | null;
+};
+
 export type ChatGeneration = {
   assistantMessageId: string;
+  turnId: string;
   mode: "reply" | "resume";
   pauseRequested: boolean;
+  pauseRequestedAt: string | null;
   startedAt: string;
+  traceId: string | null;
 };
 
 export type ChatSession = {
@@ -46,6 +111,7 @@ export type ChatSession = {
   settings: ChatSettings;
   status: ChatSessionStatus;
   messages: ChatMessage[];
+  turns: ChatTurnRunSummary[];
   generation: ChatGeneration | null;
   createdAt: string;
   updatedAt: string;
@@ -77,9 +143,14 @@ export type PromptMessage = {
 };
 
 export type ProviderStreamRequest = {
+  sessionId: string;
+  turnId: string;
+  rootTurnId: string;
+  mode: "reply" | "resume";
   model: string;
   systemPrompt: string;
   messages: PromptMessage[];
+  promptRefs: ChatPromptReference[];
   temperature: number;
   maxTokens: number;
   enablePromptCaching: boolean;
@@ -95,6 +166,10 @@ export type StreamChunk =
       type: "metadata";
       usage?: Record<string, number> | undefined;
       stopReason?: string | undefined;
+      providerRequestId?: string | undefined;
+      observationId?: string | undefined;
+      responseStatus?: number | undefined;
+      headersLatencyMs?: number | undefined;
     };
 
 export type StreamEnvelope =

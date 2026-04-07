@@ -40,6 +40,45 @@ pnpm dev
 
 默认会始终暴露 `Mock Provider`，所以即使没配置真实 API Key 也能直接体验暂停/继续。
 
+## 本地观测栈
+
+如果你想在本地通过页面查看 trace、metrics 和运行状态，需要先准备 Docker，因为观测栈通过 `docker compose` 启动。
+
+macOS 推荐做法：
+
+1. 安装 Docker Desktop for Mac
+2. 启动 `Docker.app`，等待 Docker Engine 就绪
+3. 重新打开一个终端窗口
+4. 先确认命令可用
+
+```bash
+docker version
+docker compose version
+```
+
+5. 启动观测栈与应用
+
+```bash
+cp .env.example .env.local
+pnpm install
+pnpm obs:up
+pnpm dev:otel
+```
+
+启动后可以访问：
+
+- 应用页面：`http://localhost:3000`
+- Grafana LGTM：`http://localhost:3002`
+- OTel Collector health：`http://localhost:13133`
+- Langfuse：取决于你的自托管或云端地址，默认示例为 `http://127.0.0.1:3003`
+
+如果执行 `pnpm obs:up` 时看到 `sh: docker: command not found`，说明当前系统里还没有可用的 Docker CLI，或者 Docker Desktop 还没启动。这种情况下先完成 Docker 安装与启动，再重新执行上面的命令。
+
+相关官方文档：
+
+- Docker Desktop for Mac: https://docs.docker.com/desktop/setup/install/mac-install/
+- Docker Compose: https://docs.docker.com/compose/install/
+
 ## 生产建议
 
 - Vercel / Serverless 正式部署时，不要继续用 `file` 或 `memory` 仓储

@@ -1,0 +1,22 @@
+services:
+  otel-lgtm:
+    image: grafana/otel-lgtm:latest
+    container_name: llm-pause-resume-chat-otel-lgtm
+    ports:
+      - "3002:3000"
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.143.1
+    container_name: llm-pause-resume-chat-otel-collector
+    command:
+      - "--config=/etc/otelcol-contrib/config.yaml"
+    volumes:
+      - ./otel/collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "13133:13133"
+    depends_on:
+      - otel-lgtm
+    restart: unless-stopped
